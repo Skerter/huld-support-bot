@@ -21,7 +21,10 @@ async def on_startup(config: Config, bot: Bot) -> None:
 async def main() -> None:
     """Run one polling instance with independent persistent Valkey storage."""
     config = load_config()
-    storage = RedisStorage.from_url(config.redis.dsn(), socket_connect_timeout=5, socket_timeout=5)
+    storage = RedisStorage.from_url(
+        config.redis.dsn(),
+        connection_kwargs={"socket_connect_timeout": 5, "socket_timeout": 5},
+    )
     bot = Bot(token=config.bot.TOKEN, session=AiohttpSession(timeout=15),
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=storage, config=config)
