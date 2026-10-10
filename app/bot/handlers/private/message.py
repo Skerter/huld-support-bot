@@ -55,6 +55,3 @@ async def handle_incoming_message(
         with suppress(TelegramAPIError):
             await message.reply(manager.text_message.get("delivery_failed"))
         return
-    # Success is acknowledged only after the complete message/album has been copied.
-    with suppress(TelegramAPIError):
-        await message.reply(manager.text_message.get("message_sent"))

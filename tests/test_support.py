@@ -41,6 +41,7 @@ async def test_first_and_repeat_requests_use_same_topic(runtime):
     assert len(runtime.api.named("createForumTopic")) == 1
     assert [m.message_thread_id for m in runtime.api.named("forwardMessage")] == [701, 701]
     assert (await runtime.redis.get_by_message_thread_id(701)).id == CLIENT
+    assert not runtime.api.named("sendMessage")
 
 
 async def test_operator_reply_routes_to_topic_owner(runtime):
@@ -91,8 +92,7 @@ async def test_private_api_failure_has_no_success_confirmation(runtime, stage):
     runtime.api.failures[stage].append(TelegramBadRequest(method=method, message="failure"))
     await runtime.feed(private())
     texts = [m.text for m in runtime.api.named("sendMessage")]
-    assert TextMessage("ru").get("message_sent") not in texts
-    assert TextMessage("ru").get("delivery_failed") in texts
+    assert texts == [TextMessage("ru").get("delivery_failed")]
     assert not runtime.api.named("deleteMessage")
 
 
@@ -255,6 +255,7 @@ async def test_mixed_album_preserves_order_captions_and_one_request(runtime, dir
     assert [m.caption for m in sent[0].media] == ["<first>", "second"]
     assert sent[0].media[0].caption_entities[0].type == "bold"
     assert all(m.parse_mode is None for m in sent[0].media)
+    assert not runtime.api.named("sendMessage")
     if direction == "private":
         assert await runtime.client.get(f"support:rate:messages:{CLIENT}") == b"1"
 

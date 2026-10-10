@@ -63,7 +63,6 @@ class TextMessage(Text):
                 "delivery_failed": "We could not deliver your message. Please try sending it again later.",
                 "rate_limited": "Too many messages. Wait one minute and resend your message; it has not been delivered.",
                 "request_blocked": "Your access to support is restricted. This message has not been delivered.",
-                "message_sent": "<b>Message sent!</b> Expect a response.",
                 "message_edited": (
                     "<b>The message was edited only in your chat.</b> "
                     "To send an edited message, send it as a new message."
@@ -120,7 +119,6 @@ class TextMessage(Text):
                 "delivery_failed": "Не удалось доставить сообщение. Пожалуйста, отправьте его ещё раз немного позже.",
                 "rate_limited": "Слишком много сообщений. Подождите минуту и повторите отправку: сообщение ещё не доставлено.",
                 "request_blocked": "Доступ к поддержке ограничен. Сообщение не доставлено.",
-                "message_sent": "<b>Сообщение отправлено!</b> Ожидайте ответа.",
                 "message_edited": (
                     "<b>Сообщение отредактировано только в вашем чате.</b> "
                     "Чтобы отправить отредактированное сообщение, отправьте его как новое сообщение."
