@@ -29,10 +29,12 @@ class ManagerMiddleware(BaseMiddleware):
         # Extract the user, state, and state data from data
         user: User = data.get("event_from_user")
         state: FSMContext = data.get("state")
-        state_data = await state.get_data()
+        state_data = await state.get_data() if state else {}
 
-        # Get the language_code from state_data or user.language_code
-        language_code = state_data.get("language_code", user.language_code)
+        # Prefer the persistent user language, then the operator's FSM language.
+        user_data = data.get("user_data")
+        language_code = (user_data.language_code if user_data else
+                         state_data.get("language_code", "ru"))
         # Create a Manager instance with a custom emoji, data, and language_code
         manager = Manager("💎", data, language_code)
         # Pass the manager object to the handler function

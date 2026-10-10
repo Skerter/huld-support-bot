@@ -1,107 +1,94 @@
 import json
 
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 from .models import UserData
 
 
 class RedisStorage:
-    """Class for managing user data storage using Redis."""
+    """Persist users and their topic index in the original Redis key format."""
 
     NAME = "users"
 
     def __init__(self, redis: Redis) -> None:
-        """
-        Initializes the RedisStorage instance.
-
-        :param redis: The Redis instance to be used for data storage.
-        """
         self.redis = redis
 
-    async def _get(self, name: str, key: str | int) -> bytes | None:
-        """
-        Retrieves data from Redis.
+    def user_lock(self, user_id: int):
+        return self.redis.lock(f"support:user:{user_id}", timeout=300, blocking_timeout=15)
 
-        :param name: The name of the Redis hash.
-        :param key: The key to be retrieved.
-        :return: The retrieved data or None if not found.
-        """
-        async with self.redis.client() as client:
-            return await client.hget(name, key)
-
-    async def _set(self, name: str, key: str | int, value: any) -> None:
-        """
-        Sets data in Redis.
-
-        :param name: The name of the Redis hash.
-        :param key: The key to be set.
-        :param value: The value to be set.
-        """
-        async with self.redis.client() as client:
-            await client.hset(name, key, value)
-
-    async def _update_index(self, message_thread_id: int, user_id: int) -> None:
-        """
-        Updates the user index in Redis.
-
-        :param message_thread_id: The ID of the message thread.
-        :param user_id: The ID of the user to be updated in the index.
-        """
-        index_key = f"{self.NAME}_index_{message_thread_id}"
-        await self._set(index_key, user_id, "1")
-
-    async def get_by_message_thread_id(self, message_thread_id: int) -> UserData | None:
-        """
-        Retrieves user data based on message thread ID.
-
-        :param message_thread_id: The ID of the message thread.
-        :return: The user data or None if not found.
-        """
-        user_id = await self._get_user_id_by_message_thread_id(message_thread_id)
-        return None if user_id is None else await self.get_user(user_id)
-
-    async def _get_user_id_by_message_thread_id(self, message_thread_id: int) -> int | None:
-        """
-        Retrieves user ID based on message thread ID.
-
-        :param message_thread_id: The ID of the message thread.
-        :return: The user ID or None if not found.
-        """
-        index_key = f"{self.NAME}_index_{message_thread_id}"
-        async with self.redis.client() as client:
-            user_ids = await client.hkeys(index_key)
-            return int(user_ids[0]) if user_ids else None
+    def topic_lock(self, user_id: int):
+        return self.redis.lock(f"support:topic:{user_id}", timeout=120, blocking_timeout=15)
 
     async def get_user(self, id_: int) -> UserData | None:
-        """
-        Retrieves user data based on user ID.
+        data = await self.redis.hget(self.NAME, id_)
+        return UserData(**json.loads(data)) if data is not None else None
 
-        :param id_: The ID of the user.
-        :return: The user data or None if not found.
-        """
-        data = await self._get(self.NAME, id_)
-        if data is not None:
-            decoded_data = json.loads(data)
-            return UserData(**decoded_data)
-        return None
+    async def get_by_message_thread_id(self, message_thread_id: int | None) -> UserData | None:
+        if message_thread_id is None:
+            return None
+        index_key = f"{self.NAME}_index_{message_thread_id}"
+        # Validate legacy indices: ambiguous or stale indices must never misroute a reply.
+        matches = []
+        for user_id in await self.redis.hkeys(index_key):
+            user = await self.get_user(int(user_id))
+            if user is not None and user.message_thread_id == message_thread_id:
+                matches.append(user)
+        return matches[0] if len(matches) == 1 else None
 
     async def update_user(self, id_: int, data: UserData) -> None:
-        """
-        Updates user data in Redis.
+        if id_ != data.id:
+            raise ValueError("User ID mismatch")
+        await self._write(id_, data=data)
 
-        :param id_: The ID of the user to be updated.
-        :param data: The updated user data.
-        """
-        json_data = json.dumps(data.to_dict())
-        await self._set(self.NAME, id_, json_data)
-        await self._update_index(data.message_thread_id, id_)
+    async def update_fields(self, id_: int, **fields) -> UserData:
+        """Patch current data without overwriting concurrent changes to other fields."""
+        return await self._write(id_, fields=fields)
 
-    async def get_all_users_ids(self) -> list[int]:
-        """
-        Retrieves all user IDs stored in the Redis hash.
+    async def _write(self, id_: int, data: UserData | None = None, fields=None) -> UserData:
+        for _ in range(10):
+            async with self.redis.pipeline(transaction=True) as pipe:
+                try:
+                    await pipe.watch(self.NAME)
+                    raw = await pipe.hget(self.NAME, id_)
+                    previous = UserData(**json.loads(raw)) if raw is not None else None
+                    current = data
+                    if current is None:
+                        if previous is None:
+                            raise ValueError("User not found")
+                        current = UserData(**(previous.to_dict() | fields))
+                    if current.id != id_:
+                        raise ValueError("User ID mismatch")
+                    thread_id = current.message_thread_id
+                    index_key = f"{self.NAME}_index_{thread_id}"
+                    if thread_id is not None:
+                        await pipe.watch(index_key)
+                        for owner in await pipe.hkeys(index_key):
+                            owner_id = int(owner)
+                            owner_raw = await pipe.hget(self.NAME, owner_id)
+                            if owner_id != id_ and owner_raw is not None:
+                                if json.loads(owner_raw).get("message_thread_id") == thread_id:
+                                    raise ValueError("Topic already belongs to another user")
+                    pipe.multi()
+                    if previous is not None and previous.message_thread_id != thread_id:
+                        if previous.message_thread_id is not None:
+                            pipe.hdel(f"{self.NAME}_index_{previous.message_thread_id}", id_)
+                    pipe.delete(f"{self.NAME}_index_None")
+                    pipe.hset(self.NAME, id_, json.dumps(current.to_dict()))
+                    if thread_id is not None:
+                        pipe.delete(index_key)
+                        pipe.hset(index_key, id_, "1")
+                    await pipe.execute()
+                    return current
+                except WatchError:
+                    continue
+        raise RuntimeError("Concurrent user update did not complete")
 
-        :return: A list of all user IDs.
-        """
-        async with self.redis.client() as client:
-            user_ids = await client.hkeys(self.NAME)
-            return [int(user_id) for user_id in user_ids]
+    async def allow_request(self, key: str, limit: int, seconds: int = 60) -> bool:
+        """Count requests in a bounded window shared by all bot instances."""
+        count = await self.redis.eval(
+            "local n = redis.call('INCR', KEYS[1]); "
+            "if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return n",
+            1, f"support:rate:{key}", seconds,
+        )
+        return count <= limit

@@ -1,80 +1,52 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from environs import Env
 
 
 @dataclass
 class BotConfig:
-    """
-    Data class representing the configuration for the bot.
-
-    Attributes:
-    - TOKEN (str): The bot token.
-    - DEV_ID (int): The developer's user ID.
-    - GROUP_ID (int): The group chat ID.
-    - BOT_EMOJI_ID (str): The custom emoji ID for the group's topic.
-    """
-    TOKEN: str
+    TOKEN: str = field(repr=False)
     DEV_ID: int
     GROUP_ID: int
-    BOT_EMOJI_ID: str
+    BOT_EMOJI_ID: str = ""
+    MESSAGES_PER_MINUTE: int = 30
+    TOPICS_PER_MINUTE: int = 10
 
 
 @dataclass
 class RedisConfig:
-    """
-    Data class representing the configuration for Redis.
-
-    Attributes:
-    - HOST (str): The Redis host.
-    - PORT (int): The Redis port.
-    - DB (int): The Redis database number.
-    """
-    HOST: str
-    PORT: int
-    DB: int
+    HOST: str = "valkey"
+    PORT: int = 6379
+    DB: int = 0
 
     def dsn(self) -> str:
-        """
-        Generates a Redis connection DSN (Data Source Name) using the provided host, port, and database.
-
-        :return: The generated DSN.
-        """
         return f"redis://{self.HOST}:{self.PORT}/{self.DB}"
 
 
 @dataclass
 class Config:
-    """
-    Data class representing the overall configuration for the application.
-
-    Attributes:
-    - bot (BotConfig): The bot configuration.
-    - redis (RedisConfig): The Redis configuration.
-    """
     bot: BotConfig
     redis: RedisConfig
 
 
 def load_config() -> Config:
-    """
-    Load the configuration from environment variables and return a Config object.
-
-    :return: The Config object with loaded configuration.
-    """
+    """Read local .env or container environment; validate without exposing values."""
     env = Env()
-    env.read_env()
-
-    return Config(
+    env.read_env(".env", recurse=False)
+    config = Config(
         bot=BotConfig(
-            TOKEN=env.str("BOT_TOKEN"),
-            DEV_ID=env.int("BOT_DEV_ID"),
-            GROUP_ID=env.int("BOT_GROUP_ID"),
-            BOT_EMOJI_ID=env.str("BOT_EMOJI_ID"),
+            TOKEN=env.str("BOT_TOKEN"), DEV_ID=env.int("BOT_DEV_ID"),
+            GROUP_ID=env.int("BOT_GROUP_ID"), BOT_EMOJI_ID=env.str("BOT_EMOJI_ID", ""),
+            MESSAGES_PER_MINUTE=env.int("BOT_MESSAGES_PER_MINUTE", 30),
+            TOPICS_PER_MINUTE=env.int("BOT_TOPICS_PER_MINUTE", 10),
         ),
         redis=RedisConfig(
-            HOST=env.str("REDIS_HOST"),
-            PORT=env.int("REDIS_PORT"),
-            DB=env.int("REDIS_DB"),
+            HOST=env.str("REDIS_HOST", "valkey"), PORT=env.int("REDIS_PORT", 6379),
+            DB=env.int("REDIS_DB", 0),
         ),
     )
+    if config.bot.DEV_ID <= 0 or config.bot.GROUP_ID >= 0:
+        raise ValueError("BOT_DEV_ID must be positive; BOT_GROUP_ID must be negative")
+    if min(config.bot.MESSAGES_PER_MINUTE, config.bot.TOPICS_PER_MINUTE) <= 0:
+        raise ValueError("Rate limits must be positive")
+    return config

@@ -125,7 +125,7 @@ class Manager:
         :raise TelegramBadRequest: If there is an issue with deleting or editing the previous message.
         """
         message_id = await self.get_old_message_id()
-        if not message_id: return  # noqa:E701
+        if message_id <= 0: return  # noqa:E701
 
         try:
             await self.bot.delete_message(

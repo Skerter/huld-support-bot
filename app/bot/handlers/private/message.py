@@ -1,108 +1,60 @@
-import asyncio
+import logging
+from contextlib import suppress
 
 from aiogram import Router, F
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import StateFilter
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.types import Message
 
 from app.bot.manager import Manager
 from app.bot.types.album import Album
-from app.bot.utils.create_forum_topic import (
-    create_forum_topic,
-    get_or_create_forum_topic,
-)
+from app.bot.utils.create_forum_topic import get_or_create_forum_topic
 from app.bot.utils.redis import RedisStorage
 from app.bot.utils.redis.models import UserData
+from app.bot.utils.exceptions import CreateForumTopicException, NotEnoughRightsException, NotAForumException
+from app.bot.filters import SupportContent
 
 router = Router()
-router.message.filter(F.chat.type == "private", StateFilter(None))
+router.message.filter(F.chat.type == "private", F.from_user.is_bot == False, SupportContent())
+router.edited_message.filter(F.chat.type == "private", F.from_user.is_bot == False, SupportContent())
 
 
 @router.edited_message()
 async def handle_edited_message(message: Message, manager: Manager) -> None:
-    """
-    Handle edited messages.
-
-    :param message: The edited message.
-    :param manager: Manager object.
-    :return: None
-    """
-    # Get the text for the edited message
-    text = manager.text_message.get("message_edited")
-    # Reply to the edited message with the specified text
-    msg = await message.reply(text)
-    # Wait for 5 seconds before deleting the reply
-    await asyncio.sleep(5)
-    # Delete the reply to the edited message
-    await msg.delete()
+    await message.reply(manager.text_message.get("message_edited"))
 
 
-@router.message(F.media_group_id)
-@router.message(F.media_group_id.is_(None))
+@router.message()
 async def handle_incoming_message(
-        message: Message,
-        manager: Manager,
-        redis: RedisStorage,
-        user_data: UserData,
-        album: Album | None = None,
+    message: Message, manager: Manager, redis: RedisStorage,
+    user_data: UserData, album: Album | None = None,
 ) -> None:
-    """
-    Handles incoming messages and copies them to the forum topic.
-    If the user is banned, the messages are ignored.
-
-    :param message: The incoming message.
-    :param manager: Manager object.
-    :param redis: RedisStorage object.
-    :param user_data: UserData object.
-    :param album: Album object or None.
-    :return: None
-    """
-    # Check if the user is banned
+    """Deliver real requests; retain originals and explicitly report failed delivery."""
     if user_data.is_banned:
+        await message.reply(manager.text_message.get("request_blocked"))
         return
 
-    async def copy_message_to_topic():
-        """
-        Copies the message or album to the forum topic.
-        If no album is provided, the message is copied. Otherwise, the album is copied.
-        """
-        message_thread_id = await get_or_create_forum_topic(
-            message.bot,
-            redis,
-            manager.config,
-            user_data,
-        )
-
-        if not album:
-            await message.forward(
-                chat_id=manager.config.bot.GROUP_ID,
-                message_thread_id=message_thread_id,
-            )
+    async def deliver(thread_id: int):
+        if album is None:
+            await message.forward(chat_id=manager.config.bot.GROUP_ID, message_thread_id=thread_id)
         else:
-            await album.copy_to(
-                chat_id=manager.config.bot.GROUP_ID,
-                message_thread_id=message_thread_id,
-            )
+            await album.copy_to(chat_id=manager.config.bot.GROUP_ID, message_thread_id=thread_id)
 
     try:
-        await copy_message_to_topic()
-    except TelegramBadRequest as ex:
-        if "message thread not found" in ex.message:
-            user_data.message_thread_id = await create_forum_topic(
-                message.bot,
-                manager.config,
-                user_data.full_name,
+        thread_id = await get_or_create_forum_topic(message.bot, redis, manager.config, user_data)
+        try:
+            await deliver(thread_id)
+        except TelegramBadRequest as exc:
+            if "message thread not found" not in exc.message.lower():
+                raise
+            thread_id = await get_or_create_forum_topic(
+                message.bot, redis, manager.config, user_data, missing_thread_id=thread_id,
             )
-            await redis.update_user(user_data.id, user_data)
-            await copy_message_to_topic()
-        else:
-            raise
-
-    # Send a confirmation message to the user
-    text = manager.text_message.get("message_sent")
-    # Reply to the edited message with the specified text
-    msg = await message.reply(text)
-    # Wait for 5 seconds before deleting the reply
-    await asyncio.sleep(5)
-    # Delete the reply to the edited message
-    await msg.delete()
+            await deliver(thread_id)
+    except (TelegramAPIError, CreateForumTopicException, NotEnoughRightsException, NotAForumException) as exc:
+        logging.warning("Request delivery failed: %s", type(exc).__name__)
+        with suppress(TelegramAPIError):
+            await message.reply(manager.text_message.get("delivery_failed"))
+        return
+    # Success is acknowledged only after the complete message/album has been copied.
+    with suppress(TelegramAPIError):
+        await message.reply(manager.text_message.get("message_sent"))

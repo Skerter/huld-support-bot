@@ -21,7 +21,7 @@ class Text(metaclass=ABCMeta):
 
         :param language_code: The language code (e.g., "ru" or "en").
         """
-        self.language_code = language_code if language_code in SUPPORTED_LANGUAGES.keys() else "en"
+        self.language_code = language_code if language_code in SUPPORTED_LANGUAGES.keys() else "ru"
 
     @property
     @abstractmethod
@@ -59,7 +59,10 @@ class TextMessage(Text):
             "en": {
                 "select_language": f"👋 <b>Hello</b>, {hbold('{full_name}')}!\n\nSelect language:",
                 "change_language": "<b>Select language:</b>",
-                "main_menu": "<b>Write your question</b>, and we will answer you as soon as possible:",
+                "main_menu": "<b>Huld Support Bot</b>\n\nWrite your question here. Huld VPN support will reply in this chat.",
+                "delivery_failed": "We could not deliver your message. Please try sending it again later.",
+                "rate_limited": "Too many messages. Wait one minute and resend your message; it has not been delivered.",
+                "request_blocked": "Your access to support is restricted. This message has not been delivered.",
                 "message_sent": "<b>Message sent!</b> Expect a response.",
                 "message_edited": (
                     "<b>The message was edited only in your chat.</b> "
@@ -101,7 +104,7 @@ class TextMessage(Text):
                     "<b>Registration date:</b>\n"
                     "- {created_at}"
                 ),
-                "message_not_sent": "<b>Message not sent!</b> An unexpected error occurred.",
+                "message_not_sent": "Message not delivered. Please try sending it again later.",
                 "message_sent_to_user": "<b>Message sent to user!</b>",
                 "silent_mode_enabled": (
                     "<b>Silent mode activated!</b> Messages will not be delivered to the user."
@@ -113,7 +116,10 @@ class TextMessage(Text):
             "ru": {
                 "select_language": f"👋 <b>Привет</b>, {hbold('{full_name}')}!\n\nВыберите язык:",
                 "change_language": "<b>Выберите язык:</b>",
-                "main_menu": "<b>Оставьте свой вопрос</b>, и мы ответим вам в ближайшее время:",
+                "main_menu": "<b>Huld Support Bot</b>\n\nНапишите свой вопрос. Поддержка Huld VPN ответит вам в этом чате.",
+                "delivery_failed": "Не удалось доставить сообщение. Пожалуйста, отправьте его ещё раз немного позже.",
+                "rate_limited": "Слишком много сообщений. Подождите минуту и повторите отправку: сообщение ещё не доставлено.",
+                "request_blocked": "Доступ к поддержке ограничен. Сообщение не доставлено.",
                 "message_sent": "<b>Сообщение отправлено!</b> Ожидайте ответа.",
                 "message_edited": (
                     "<b>Сообщение отредактировано только в вашем чате.</b> "
@@ -155,7 +161,7 @@ class TextMessage(Text):
                     "<b>Дата регистрации:</b>\n"
                     "- {created_at}"
                 ),
-                "message_not_sent": "<b>Сообщение не отправлено!</b> Произошла неожиданная ошибка.",
+                "message_not_sent": "Сообщение не доставлено. Повторите отправку немного позже.",
                 "message_sent_to_user": "<b>Сообщение отправлено пользователю!</b>",
                 "silent_mode_enabled": (
                     "<b>Тихий режим активирован!</b> Сообщения не будут доставлены пользователю."

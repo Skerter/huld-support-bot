@@ -1,31 +1,37 @@
-version: "3"
+name: huld-support-bot
 
 services:
-
-  bot:
-    build:
-      context: .
-    container_name: support-bot
-    command: sh -c "cd /usr/src/app && python -m app"
-    restart: always
+  support-bot:
+    build: .
+    env_file: .env
+    environment:
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+    restart: unless-stopped
     depends_on:
-      - redis
+      valkey:
+        condition: service_healthy
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  valkey:
+    image: valkey/valkey:8.1.10-alpine
+    command: ["valkey-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    restart: unless-stopped
     volumes:
-      - .:/usr/src/app
-    networks:
-      - network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  redis:
-    image: redis:alpine
-    container_name: support-redis
-    restart: always
-    volumes:
-      - ./redis/data/:/data
-    networks:
-      - network
-
-
-networks:
-  network:
+volumes:
+  valkey-data:

@@ -1,0 +1,4 @@
+aiogram==3.31.0
+cachetools>=6.0,<8
+environs>=14.1,<16
+redis>=6.2,<8

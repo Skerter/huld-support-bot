@@ -29,7 +29,7 @@ async def handler(call: CallbackQuery, manager: Manager, redis: RedisStorage, us
     if call.data in SUPPORTED_LANGUAGES.keys():
         user_data.language_code = call.data
         manager.text_message.language_code = call.data
-        await redis.update_user(user_data.id, user_data)
+        await redis.update_fields(user_data.id, language_code=call.data)
         await manager.state.update_data(language_code=call.data)
         await Window.main_menu(manager)
 
