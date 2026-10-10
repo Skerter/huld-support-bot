@@ -136,6 +136,65 @@ uv pip compile --python 3.12 requirements.in --generate-hashes -o requirements.t
 uv pip compile --python 3.12 requirements-dev.in --generate-hashes -o requirements-dev.txt
 ```
 
+## Автодеплой через GitHub Actions
+
+Схема соответствует `skerter-notify`: push в `main` запускает CD, который сначала
+вызывает CI, затем обновляет серверный checkout по SSH и собирает контейнер через
+Docker Compose. CI также проверяет pull request в `main`: установка зависимостей
+с хешами, проверка совместимости, pytest, Compose config и сборка образа.
+Сборка в CI не запускает бота и не обращается к Telegram. Ручной запуск CD доступен
+через Actions → CD → Run workflow для ветки `main`.
+
+В настройках **этого репозитория** → Settings → Secrets and variables → Actions
+добавьте secrets с теми же именами, что в `skerter-notify`:
+
+| Secret | Значение |
+| --- | --- |
+| `VPS_HOST` | Адрес сервера |
+| `VPS_USER` | SSH-пользователь с правом запускать Docker и обновлять checkout |
+| `VPS_SSH_PRIVATE_KEY` | Приватный SSH-ключ для входа на сервер |
+| `VPS_SSH_FINGERPRINT` | SHA256 fingerprint SSH host key, проверенный через доверенную консоль сервера |
+
+Secrets соседнего репозитория автоматически не наследуются. Если они заведены
+на уровне организации, предоставьте к ним доступ этому репозиторию. Значения
+токена бота и ID остаются в `.env` на сервере и не нужны для CI.
+
+Необязательные **Variables**: `VPS_DEPLOY_PATH` (по умолчанию `/opt/huld-support-bot`)
+и `VPS_SSH_PORT` (по умолчанию `22`). Укажите отдельный каталог поддержки.
+
+Один раз подготовьте сервер: установите Git и Docker с Compose v2, настройте SSH-доступ
+для Actions и доступ серверного пользователя к репозиторию. Для приватного репозитория
+нужен отдельный read-only deploy key или существующий доступ к GitHub.
+Выполните под тем пользователем, которым будет подключаться workflow:
+
+```sh
+git clone --branch main git@github.com:Skerter/huld-support-bot.git /opt/huld-support-bot
+cd /opt/huld-support-bot
+cp .env.example .env
+chmod 600 .env
+# Заполните локально BOT_TOKEN, BOT_DEV_ID и BOT_GROUP_ID.
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 120
+```
+
+Каталог должен быть доступен на запись SSH-пользователю; если `/opt` ему недоступен,
+сначала создайте каталог с подходящим владельцем через администратора сервера
+или задайте `VPS_DEPLOY_PATH` в домашнем каталоге. Для fingerprint используйте,
+например, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` в доверенной
+серверной консоли; выберите ключ, который SSH-сервер предъявляет клиенту Actions.
+
+Перед запуском серверного бота остановите локальный экземпляр с тем же токеном:
+одновременно должен работать один polling-процесс. Следующий push в `main`
+выполнит деплой автоматически после успешного CI. Checkout на сервере должен
+оставаться на `main`, без изменений отслеживаемых файлов. Workflow делает только
+fast-forward, пропускает устаревшие коммиты и выполняет деплои последовательно.
+Серверный `.env` и именованный volume Valkey сохраняются при обновлении.
+
+`--wait` проверяет healthcheck Valkey и запуск процесса бота. Работу Telegram,
+права в группе и доставку обращений проверьте отдельно после первого запуска.
+Автоматический rollback не выполняется: при ошибке смотрите Actions и
+`docker compose logs --tail=100 support-bot valkey` на сервере.
+
 ## Авторство и лицензия
 
 Основано на [nessshon/support-bot](https://github.com/nessshon/support-bot).
