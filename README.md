@@ -1,202 +1,23 @@
 # Huld Support Bot
 
-Независимый Telegram-бот поддержки Huld VPN. Пользователь пишет боту в личный чат,
-обращение попадает в постоянную тему приватной супергруппы. Ответ оператора из темы
-доставляется пользователю. Поддерживаются текст, фото, документы, видео, голосовые
-сообщения и альбомы. Бот не связан с базами, биллингом или инфраструктурой основного Huld.
+**English** | [Русский](README.ru.md)
 
-Стек: Python 3.12, aiogram 3.31.0, Redis-совместимый Python-клиент,
-Valkey 8.1.10 и Docker Compose. Русский используется по умолчанию; английский доступен
-через `/language`. Рассылок и планировщика нет.
+A self-hosted Telegram support bot. Forwards user messages to a private Telegram group, creating a dedicated topic for each user. Operators can reply directly from the group, with responses delivered through the bot.
 
-## Настройка Telegram
+### Features
 
-1. Создайте отдельного бота через [BotFather](https://t.me/BotFather), сохраните токен
-   локально в `BOT_TOKEN`. Рекомендуемое имя: **Huld Support Bot**.
-2. Создайте **приватную супергруппу**, включите темы и добавьте бота администратором.
-   Нужны права управления темами и отправки сообщений/медиа. Для индикатора `/silent`
-   дайте право закреплять сообщения; режим работает и без закрепления.
-   Бот должен получать обычные сообщения оператора: администраторы получают сообщения
-   независимо от privacy mode. Не используйте анонимный режим администратора.
-3. Получите свой числовой Telegram ID через `/id` в личном чате с ботом после его запуска
-   или через доверенный бот определения ID. Укажите его в `BOT_DEV_ID`:
-   только этот человек может отвечать и выполнять операторские команды.
-4. Получите числовой ID супергруппы (обычно начинается с `-100`) через доверенный бот
-   определения ID или Telegram-клиент, показывающий ID. Укажите его в `BOT_GROUP_ID`.
-   После запуска `/id` в настроенной группе подтвердит ID. Команды из других групп
-   и от других участников игнорируются. Если ID ещё неизвестны, определите их перед запуском.
+- Two-way messaging via Telegram Topics
+- Support for text, photos, files, and other media
+- User blocking and silent mode
+- Russian and English localization
+- Persistent conversations across restarts
 
-## Локальный запуск
+### Tech Stack
 
-Нужен работающий Docker с Compose v2.
+Python 3.12 · aiogram 3 · Valkey · Docker Compose
 
-```powershell
-Copy-Item .env.example .env
-# Заполните BOT_TOKEN, BOT_DEV_ID и BOT_GROUP_ID в локальном редакторе.
-docker compose config --quiet
-docker compose up -d --build
-docker compose logs -f support-bot
-```
+### License
 
-На Linux вместо `Copy-Item` используйте `cp .env.example .env`.
-Не публикуйте `.env`, токен, приватные ID и вывод конфигурации с секретами.
+Based on [nessshon/support-bot](https://github.com/nessshon/support-bot).
 
-| Переменная | Назначение |
-| --- | --- |
-| `BOT_TOKEN` | Токен отдельного бота от BotFather |
-| `BOT_DEV_ID` | Положительный ID единственного оператора |
-| `BOT_GROUP_ID` | Отрицательный ID приватной супергруппы поддержки |
-| `BOT_EMOJI_ID` | Необязательная иконка темы; можно оставить пустым |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` | Valkey: `valkey`, `6379`, `0`; старые имена сохранены |
-| `BOT_MESSAGES_PER_MINUTE` | Лимит личных сообщений за 60 секунд, по умолчанию 30; альбом считается одним |
-| `BOT_TOPICS_PER_MINUTE` | Общий лимит новых тем за 60 секунд, по умолчанию 10 |
-
-Compose фиксирует адрес хранилища на собственном сервисе `valkey`. Порт хранилища
-не публикуется на хосте. Приложение ждёт его healthcheck и работает от UID/GID 10001.
-Исходники, `.env` и Git-каталог не монтируются в контейнер. Логи идут в stderr/stdout,
-с ограничением размера Docker-логов. Запускайте **один** экземпляр polling-бота на токен.
-
-```sh
-docker compose logs --tail=100 support-bot valkey
-docker compose restart support-bot
-docker compose stop
-docker compose start
-docker compose down
-```
-
-`down` сохраняет именованный volume. **`down -v` удаляет данные**, включая связь пользователей с темами.
-
-## Команды и поведение
-
-Личный чат: `/start` — приветствие без создания темы; `/language` — выбор языка;
-`/source` — исходный проект; `/id` — свой Telegram ID.
-
-В теме поддержки, только для `BOT_DEV_ID`:
-
-- `/ban` — запретить или снова разрешить обращения пользователя.
-- `/silent` — включить/выключить внутренние комментарии: в этом режиме ответы
-  из темы не отправляются клиенту. По умолчанию обычные ответы доставляются.
-- `/information` — информация о пользователе темы.
-- `/id` — ID настроенной группы (работает также вне пользовательской темы).
-
-Тема создаётся при первом реальном обращении; последующие используют ту же тему.
-Если тема вручную удалена, при следующем обращении создаётся замена. Закрытые темы
-не пересоздаются автоматически. Служебные события, сообщения ботов и неизвестные
-команды не пересылаются. Отредактированные сообщения не синхронизируются: бот просит
-отправить изменённый текст отдельным сообщением. Альбомы сохраняют порядок и подписи.
-
-Успешная пересылка происходит без автоматического ответа в личном чате. При ошибке
-или лимите бот просит повторить отправку; исходное обращение остаётся в личном чате.
-Автоматической очереди повторной доставки нет. При неопределённом сетевом результате
-повторная отправка может привести к дубликату сообщения. Если создание темы успешно,
-а процесс остановился до записи в Valkey, может остаться тема без привязки: Telegram
-не поддерживает атомарную транзакцию с локальным хранилищем.
-
-## Данные и резервная копия
-
-Связь пользователей с темами, язык, блокировки и `/silent` хранятся в отдельном
-volume `huld-support-bot_valkey-data`. Формат пользовательских записей исходного
-проекта сохранён. Используется AOF (`appendonly yes`, `appendfsync everysec`): при
-аварийном отключении возможно потерять примерно последнюю секунду записей.
-
-Для согласованной копии остановите бот и Valkey, скопируйте **весь** `/data`
-(включая каталог `appendonlydir`) и снова запустите сервисы. Пример:
-
-```sh
-docker compose stop
-mkdir backups
-docker compose run --rm --no-deps --user 0 --entrypoint sh -v ./backups:/backup valkey -c 'tar czf /backup/valkey-data.tgz -C /data .'
-docker compose start
-```
-
-Для восстановления на остановленных сервисах распакуйте архив в тот же volume,
-сохранив владельца и права доступа, затем запустите Compose. Храните копии закрыто:
-они содержат пользовательские ID и настройки поддержки. Не подключайте хранилище
-основного Huld и не удаляйте volume при обычном обновлении контейнеров.
-
-## Разработка и проверки
-
-```powershell
-uv venv --python 3.12
-uv pip sync requirements-dev.txt
-.venv\Scripts\python -m pytest -q
-.venv\Scripts\python -m pip_audit -r requirements.txt --disable-pip --no-deps
-```
-
-Либо создайте окружение через `python -m venv .venv` и установите зависимости
-через `python -m pip install --require-hashes -r requirements-dev.txt`.
-Тесты используют поддельный Telegram API и fakeredis, без реальных отправок.
-Они не подтверждают доступность Telegram или права бота в вашей группе.
-
-Прямые зависимости указаны в `requirements.in` и `requirements-dev.in`.
-Полный граф с фиксированными версиями и хешами — в соответствующих `.txt`:
-
-```sh
-uv pip compile --python 3.12 requirements.in --generate-hashes -o requirements.txt
-uv pip compile --python 3.12 requirements-dev.in --generate-hashes -o requirements-dev.txt
-```
-
-## Автодеплой через GitHub Actions
-
-Схема соответствует `skerter-notify`: push в `main` запускает CD, который сначала
-вызывает CI, затем обновляет серверный checkout по SSH и собирает контейнер через
-Docker Compose. CI также проверяет pull request в `main`: установка зависимостей
-с хешами, проверка совместимости, pytest, Compose config и сборка образа.
-Сборка в CI не запускает бота и не обращается к Telegram. Ручной запуск CD доступен
-через Actions → CD → Run workflow для ветки `main`.
-
-В настройках **этого репозитория** → Settings → Secrets and variables → Actions
-добавьте secrets с теми же именами, что в `skerter-notify`:
-
-| Secret | Значение |
-| --- | --- |
-| `VPS_HOST` | Адрес сервера |
-| `VPS_USER` | SSH-пользователь с правом запускать Docker и обновлять checkout |
-| `VPS_SSH_PRIVATE_KEY` | Приватный SSH-ключ для входа на сервер |
-| `VPS_SSH_FINGERPRINT` | SHA256 fingerprint SSH host key, проверенный через доверенную консоль сервера |
-
-Secrets соседнего репозитория автоматически не наследуются. Если они заведены
-на уровне организации, предоставьте к ним доступ этому репозиторию. Значения
-токена бота и ID остаются в `.env` на сервере и не нужны для CI.
-
-Необязательные **Variables**: `VPS_DEPLOY_PATH` (по умолчанию `/opt/huld-support-bot`)
-и `VPS_SSH_PORT` (по умолчанию `22`). Укажите отдельный каталог поддержки.
-
-Один раз подготовьте сервер: установите Git и Docker с Compose v2, настройте SSH-доступ
-для Actions и доступ серверного пользователя к репозиторию. Для приватного репозитория
-нужен отдельный read-only deploy key или существующий доступ к GitHub.
-Выполните под тем пользователем, которым будет подключаться workflow:
-
-```sh
-git clone --branch main git@github.com:Skerter/huld-support-bot.git /opt/huld-support-bot
-cd /opt/huld-support-bot
-cp .env.example .env
-chmod 600 .env
-# Заполните локально BOT_TOKEN, BOT_DEV_ID и BOT_GROUP_ID.
-docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout 120
-```
-
-Каталог должен быть доступен на запись SSH-пользователю; если `/opt` ему недоступен,
-сначала создайте каталог с подходящим владельцем через администратора сервера
-или задайте `VPS_DEPLOY_PATH` в домашнем каталоге. Для fingerprint используйте,
-например, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` в доверенной
-серверной консоли; выберите ключ, который SSH-сервер предъявляет клиенту Actions.
-
-Перед запуском серверного бота остановите локальный экземпляр с тем же токеном:
-одновременно должен работать один polling-процесс. Следующий push в `main`
-выполнит деплой автоматически после успешного CI. Checkout на сервере должен
-оставаться на `main`, без изменений отслеживаемых файлов. Workflow делает только
-fast-forward, пропускает устаревшие коммиты и выполняет деплои последовательно.
-Серверный `.env` и именованный volume Valkey сохраняются при обновлении.
-
-`--wait` проверяет healthcheck Valkey и запуск процесса бота. Работу Telegram,
-права в группе и доставку обращений проверьте отдельно после первого запуска.
-Автоматический rollback не выполняется: при ошибке смотрите Actions и
-`docker compose logs --tail=100 support-bot valkey` на сервере.
-
-## Авторство и лицензия
-
-Основано на [nessshon/support-bot](https://github.com/nessshon/support-bot).
-Оригинальный автор: **Shon Ness**, Copyright (c) 2024.
-Исходная лицензия [MIT](LICENSE) сохранена, включая авторское уведомление.
+Licensed under the [MIT License](LICENSE).
